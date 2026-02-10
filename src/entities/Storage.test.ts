@@ -38,7 +38,7 @@ describe("TypedStorage", () => {
 
   beforeEach(() => {
     adapter = new MockStorage();
-    storage = new TypedStorage(adapter);
+    storage = new TypedStorage({ adapter });
   });
 
   describe("set and get", () => {
@@ -205,6 +205,57 @@ describe("TypedStorage", () => {
 
       expect(storage.get<string>("short")).toBeNull();
       expect(storage.get<string>("long")).toBe("b");
+    });
+  });
+
+  describe("prefix", () => {
+    let prefixedStorage: TypedStorage;
+
+    beforeEach(() => {
+      prefixedStorage = new TypedStorage({ adapter, prefix: "app_" });
+    });
+
+    it("stores values with prefix in the adapter", () => {
+      prefixedStorage.set("user", { name: "Dan" });
+      expect(adapter.getItem("app_user")).not.toBeNull();
+      expect(adapter.getItem("user")).toBeNull();
+    });
+
+    it("retrieves values by unprefixed key", () => {
+      prefixedStorage.set("user", { name: "Dan" });
+      expect(prefixedStorage.get<{ name: string }>("user")).toEqual({ name: "Dan" });
+    });
+
+    it("removes values with prefix", () => {
+      prefixedStorage.set("key", "value");
+      prefixedStorage.remove("key");
+      expect(adapter.getItem("app_key")).toBeNull();
+    });
+
+    it("returns keys without prefix", () => {
+      prefixedStorage.set("a", 1);
+      prefixedStorage.set("b", 2);
+
+      const keys = prefixedStorage.keys();
+      expect(keys).toEqual(["a", "b"]);
+    });
+
+    it("clear only removes prefixed keys", () => {
+      adapter.setItem("other", "data");
+      prefixedStorage.set("a", 1);
+      prefixedStorage.set("b", 2);
+
+      prefixedStorage.clear();
+
+      expect(adapter.getItem("other")).toBe("data");
+      expect(adapter.getItem("app_a")).toBeNull();
+      expect(adapter.getItem("app_b")).toBeNull();
+    });
+
+    it("has checks with prefix", () => {
+      prefixedStorage.set("exists", true);
+      expect(prefixedStorage.has("exists")).toBe(true);
+      expect(prefixedStorage.has("nope")).toBe(false);
     });
   });
 });

@@ -7,15 +7,26 @@ export interface StorageOptions {
   ttl?: number;
 }
 
+export interface TypedStorageConfig {
+  adapter: globalThis.Storage;
+  prefix?: string;
+}
+
 export class TypedStorage {
   private readonly adapter: globalThis.Storage;
+  private readonly prefix: string;
 
-  constructor(adapter: globalThis.Storage) {
-    this.adapter = adapter;
+  constructor(config: TypedStorageConfig) {
+    this.adapter = config.adapter;
+    this.prefix = config.prefix ?? "";
+  }
+
+  private prefixKey(key: string): string {
+    return this.prefix + key;
   }
 
   get<T>(key: string): T | null {
-    const raw = this.adapter.getItem(key);
+    const raw = this.adapter.getItem(this.prefixKey(key));
 
     if (raw === null) {
       return null;
@@ -43,15 +54,27 @@ export class TypedStorage {
       entry.expiresAt = Date.now() + options.ttl;
     }
 
-    this.adapter.setItem(key, JSON.stringify(entry));
+    this.adapter.setItem(this.prefixKey(key), JSON.stringify(entry));
   }
 
   remove(key: string): void {
-    this.adapter.removeItem(key);
+    this.adapter.removeItem(this.prefixKey(key));
   }
 
   clear(): void {
-    this.adapter.clear();
+    if (this.prefix === "") {
+      this.adapter.clear();
+
+      return;
+    }
+
+    for (let i = this.adapter.length - 1; i >= 0; i--) {
+      const key = this.adapter.key(i);
+
+      if (key !== null && key.startsWith(this.prefix)) {
+        this.adapter.removeItem(key);
+      }
+    }
   }
 
   has(key: string): boolean {
@@ -64,8 +87,8 @@ export class TypedStorage {
     for (let i = 0; i < this.adapter.length; i++) {
       const key = this.adapter.key(i);
 
-      if (key !== null) {
-        result.push(key);
+      if (key !== null && key.startsWith(this.prefix)) {
+        result.push(key.slice(this.prefix.length));
       }
     }
 
