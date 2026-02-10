@@ -1,0 +1,141 @@
+{
+  "name": "all-you-need",
+  "version": "0.1.0",
+  "description": "Universal TypeScript utility library. Zero dependencies, tree-shakeable, works in browser and Node.js.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./types": {
+      "import": {
+        "types": "./dist/types/index.d.ts",
+        "default": "./dist/types/index.js"
+      },
+      "require": {
+        "types": "./dist/types/index.d.cts",
+        "default": "./dist/types/index.cjs"
+      }
+    },
+    "./entities": {
+      "import": {
+        "types": "./dist/entities/index.d.ts",
+        "default": "./dist/entities/index.js"
+      },
+      "require": {
+        "types": "./dist/entities/index.d.cts",
+        "default": "./dist/entities/index.cjs"
+      }
+    },
+    "./utils": {
+      "import": {
+        "types": "./dist/utils/index.d.ts",
+        "default": "./dist/utils/index.js"
+      },
+      "require": {
+        "types": "./dist/utils/index.d.cts",
+        "default": "./dist/utils/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "README.ru.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "publint": "publint",
+    "size": "size-limit",
+    "prepublishOnly": "npm run lint && npm run typecheck && npm run test && npm run build && npm run publint",
+    "prepare": "husky"
+  },
+  "keywords": [
+    "typescript",
+    "utilities",
+    "utils",
+    "helpers",
+    "types",
+    "type-guards",
+    "validation",
+    "async",
+    "array",
+    "object",
+    "string",
+    "date",
+    "result",
+    "storage",
+    "logger",
+    "queue",
+    "stack",
+    "zero-dependencies"
+  ],
+  "author": "Danila Borovskiy",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dborovskiy00/all-you-need.git"
+  },
+  "homepage": "https://github.com/dborovskiy00/all-you-need#readme",
+  "bugs": {
+    "url": "https://github.com/dborovskiy00/all-you-need/issues"
+  },
+  "size-limit": [
+    {
+      "path": "dist/index.js",
+      "limit": "25 KB"
+    },
+    {
+      "path": "dist/entities/index.js",
+      "limit": "5 KB"
+    },
+    {
+      "path": "dist/utils/index.js",
+      "limit": "25 KB"
+    },
+    {
+      "path": "dist/types/index.js",
+      "limit": "1 KB"
+    }
+  ],
+  "devDependencies": {
+    "@commitlint/cli": "^20.4.1",
+    "@commitlint/config-conventional": "^20.4.1",
+    "@eslint/js": "^9.39.2",
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/git": "^10.0.1",
+    "@size-limit/file": "^12.0.0",
+    "@stylistic/eslint-plugin": "^5.8.0",
+    "eslint": "^9.39.2",
+    "eslint-plugin-import-x": "^4.16.1",
+    "husky": "^9.1.7",
+    "publint": "^0.3.17",
+    "semantic-release": "^25.0.3",
+    "size-limit": "^12.0.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.55.0",
+    "vitest": "^4.0.18"
+  }
+}

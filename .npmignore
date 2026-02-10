@@ -1,0 +1,14 @@
+src/
+*.test.ts
+*.test.js
+tsconfig.json
+tsup.config.ts
+eslint.config.js
+commitlint.config.js
+.releaserc.json
+.gitignore
+.github/
+.husky/
+node_modules/
+*.tsbuildinfo
+.cursor/

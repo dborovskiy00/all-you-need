@@ -1,0 +1,14 @@
+export { chunk } from "./chunk";
+export { compact } from "./compact";
+export { difference } from "./difference";
+export { first } from "./first";
+export { flatten } from "./flatten";
+export { groupBy } from "./groupBy";
+export { intersection } from "./intersection";
+export { last } from "./last";
+export { range } from "./range";
+export { shuffle } from "./shuffle";
+export { sortBy } from "./sortBy";
+export { unique } from "./unique";
+export { uniqueBy } from "./uniqueBy";
+export { zip } from "./zip";

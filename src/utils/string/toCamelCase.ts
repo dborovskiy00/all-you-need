@@ -1,0 +1,5 @@
+export function toCamelCase(str: string): string {
+  return str
+    .replace(/[^a-zA-Z0-9]+(.)/g, (_, char: string) => char.toUpperCase())
+    .replace(/^[A-Z]/, (char) => char.toLowerCase());
+}
