@@ -1,6 +1,6 @@
 {
   "name": "all-you-need",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Universal TypeScript utility library. Zero dependencies, tree-shakeable, works in browser and Node.js.",
   "type": "module",
   "main": "./dist/index.cjs",
