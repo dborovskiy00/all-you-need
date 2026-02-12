@@ -1,3 +1,10 @@
+# [0.3.0](https://github.com/dborovskiy00/all-you-need/compare/v0.2.0...v0.3.0) (2026-02-12)
+
+
+### Features
+
+* **entities:** add JwtAuthManager for JWT auth with multiple targets ([ad6aac9](https://github.com/dborovskiy00/all-you-need/commit/ad6aac92296aa45b30aece338b4229dfc787b20a))
+
 # [0.2.0](https://github.com/dborovskiy00/all-you-need/compare/v0.1.1...v0.2.0) (2026-02-10)
 
 
