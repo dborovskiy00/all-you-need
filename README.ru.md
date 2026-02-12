@@ -112,8 +112,9 @@ import type { DeepPartial, Nullable, Merge } from "all-you-need/types";
 | `Stack<T>` | LIFO-стек |
 | `TypedStorage` | Универсальная типизированная обёртка для хранилищ с префиксом и TTL |
 | `Logger` | Логгер с уровнями, префиксом и таймстампом |
+| `JwtAuthManager` | Менеджер JWT-авторизации для нескольких бэкендов — хранение, истечение, заголовки, подписки |
 
-Также экспортирует типы: `StorageOptions`, `TypedStorageConfig`, `LogLevel`, `LoggerOptions`.
+Также экспортирует типы: `StorageOptions`, `TypedStorageConfig`, `LogLevel`, `LoggerOptions`, `JwtAuthTargetConfig`, `JwtAuthEvent`, `JwtPayload`, `JwtStorageAdapter`.
 
 ### `Result<T, E>`
 
@@ -241,6 +242,55 @@ import { Logger } from "all-you-need/entities";
 const logger = new Logger({ level: "info", prefix: "[App]", timestamp: true });
 logger.info("Server started");
 logger.debug("This will be hidden"); // уровень ниже "info"
+```
+
+### `JwtAuthManager`
+
+Управляет JWT-авторизацией для нескольких целей (например, разных бэкендов). Хранение токенов, проверка истечения, формирование заголовков запросов, подписка на изменения авторизации.
+
+| Метод | Сигнатура | Описание |
+|-------|-----------|----------|
+| `constructor` | `(config: { storage: JwtStorageAdapter; targets?: JwtAuthTargetConfig[] }) => JwtAuthManager` | Создать менеджер с хранилищем и опциональными целями |
+| `registerTarget` | `(config: JwtAuthTargetConfig) => void` | Зарегистрировать новую цель авторизации |
+| `setToken` | `(targetId: string, token: string) => void` | Сохранить токен для цели |
+| `getToken` | `(targetId: string) => string \| null` | Получить токен для цели |
+| `removeToken` | `(targetId: string) => void` | Удалить токен для цели |
+| `isAuthenticated` | `(targetId: string, leewaySeconds?: number) => boolean` | Проверить наличие валидного неистёкшего токена |
+| `isExpired` | `(targetId: string, leewaySeconds?: number) => boolean` | Проверить истечение токена |
+| `getAuthHeaders` | `(targetId: string) => Record<string, string> \| null` | Получить заголовки для HTTP-запроса |
+| `getPayload` | `(targetId: string) => JwtPayload \| null` | Получить декодированный JWT payload |
+| `subscribe` | `(targetId: string, callback: (event: JwtAuthEvent) => void) => () => void` | Подписаться на изменения авторизации; возвращает функцию отписки |
+| `refreshToken` | `(targetId: string, token: string) => void` | Обновить токен (событие `refresh`) |
+| `markExpired` | `(targetId: string) => void` | Пометить токен как истёкший (например, при 401) |
+
+**Утилиты:** `decodeJwtPayload(token)`, `isJwtExpired(token, leewaySeconds?)`
+
+`JwtAuthEvent`: `{ type: 'login' \| 'logout' \| 'expired' \| 'refresh'; token?: string; payload?: JwtPayload }`
+
+```typescript
+import { JwtAuthManager } from "all-you-need/entities";
+
+const manager = new JwtAuthManager({
+  storage: localStorage,
+  targets: [
+    { id: "api", storageKey: "jwt:api" },
+    {
+      id: "auth",
+      storageKey: "jwt:auth",
+      headerName: "X-Auth-Token",
+      headerFormat: (t) => t,
+    },
+  ],
+});
+
+manager.subscribe("api", (event) => {
+  if (event.type === "logout") {
+    // редирект на логин
+  }
+});
+
+manager.setToken("api", response.access_token);
+const headers = manager.getAuthHeaders("api"); // { Authorization: "Bearer ..." }
 ```
 
 ## Утилиты

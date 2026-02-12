@@ -112,8 +112,9 @@ import type { DeepPartial, Nullable, Merge } from "all-you-need/types";
 | `Stack<T>` | LIFO stack data structure |
 | `TypedStorage` | Universal typed wrapper for `localStorage`/`sessionStorage` with prefix and TTL |
 | `Logger` | Leveled logger with prefix, timestamp, and configurable log levels |
+| `JwtAuthManager` | JWT auth manager for multiple backends — storage, expiration, headers, subscriptions |
 
-Also exports types: `StorageOptions`, `TypedStorageConfig`, `LogLevel`, `LoggerOptions`.
+Also exports types: `StorageOptions`, `TypedStorageConfig`, `LogLevel`, `LoggerOptions`, `JwtAuthTargetConfig`, `JwtAuthEvent`, `JwtPayload`, `JwtStorageAdapter`.
 
 ### `Result<T, E>`
 
@@ -241,6 +242,55 @@ import { Logger } from "all-you-need/entities";
 const logger = new Logger({ level: "info", prefix: "[App]", timestamp: true });
 logger.info("Server started");
 logger.debug("This will be hidden"); // level is below "info"
+```
+
+### `JwtAuthManager`
+
+Manages JWT authentication for multiple targets (e.g. multiple backends). Handles storage, expiration check, auth header injection, and subscriptions to auth changes.
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `constructor` | `(config: { storage: JwtStorageAdapter; targets?: JwtAuthTargetConfig[] }) => JwtAuthManager` | Create manager with storage and optional targets |
+| `registerTarget` | `(config: JwtAuthTargetConfig) => void` | Register a new auth target |
+| `setToken` | `(targetId: string, token: string) => void` | Store token for a target |
+| `getToken` | `(targetId: string) => string \| null` | Get token for a target |
+| `removeToken` | `(targetId: string) => void` | Remove token for a target |
+| `isAuthenticated` | `(targetId: string, leewaySeconds?: number) => boolean` | Check if target has valid non-expired token |
+| `isExpired` | `(targetId: string, leewaySeconds?: number) => boolean` | Check if target's token is expired |
+| `getAuthHeaders` | `(targetId: string) => Record<string, string> \| null` | Get headers for HTTP request |
+| `getPayload` | `(targetId: string) => JwtPayload \| null` | Get decoded JWT payload |
+| `subscribe` | `(targetId: string, callback: (event: JwtAuthEvent) => void) => () => void` | Subscribe to auth changes; returns unsubscribe function |
+| `refreshToken` | `(targetId: string, token: string) => void` | Update token (emits `refresh` event) |
+| `markExpired` | `(targetId: string) => void` | Mark token as expired (e.g. on 401 response) |
+
+**Utilities:** `decodeJwtPayload(token)`, `isJwtExpired(token, leewaySeconds?)`
+
+`JwtAuthEvent`: `{ type: 'login' \| 'logout' \| 'expired' \| 'refresh'; token?: string; payload?: JwtPayload }`
+
+```typescript
+import { JwtAuthManager } from "all-you-need/entities";
+
+const manager = new JwtAuthManager({
+  storage: localStorage,
+  targets: [
+    { id: "api", storageKey: "jwt:api" },
+    {
+      id: "auth",
+      storageKey: "jwt:auth",
+      headerName: "X-Auth-Token",
+      headerFormat: (t) => t,
+    },
+  ],
+});
+
+manager.subscribe("api", (event) => {
+  if (event.type === "logout") {
+    // redirect to login
+  }
+});
+
+manager.setToken("api", response.access_token);
+const headers = manager.getAuthHeaders("api"); // { Authorization: "Bearer ..." }
 ```
 
 ## Utils
