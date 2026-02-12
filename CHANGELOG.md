@@ -1,3 +1,16 @@
+# [1.0.0](https://github.com/dborovskiy00/all-you-need/compare/v0.3.0...v1.0.0) (2026-02-12)
+
+
+### Features
+
+* change JwtAuthManager targets interface ([348ab91](https://github.com/dborovskiy00/all-you-need/commit/348ab91ea5c212351681029ddbbae2e394289d89))
+
+
+### BREAKING CHANGES
+
+* targets is now an object instead of an array.
+JwtAuthTargetConfig no longer has an id field; the object key is used as the target id.
+
 # [0.3.0](https://github.com/dborovskiy00/all-you-need/compare/v0.2.0...v0.3.0) (2026-02-12)
 
 
