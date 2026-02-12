@@ -114,7 +114,7 @@ import type { DeepPartial, Nullable, Merge } from "all-you-need/types";
 | `Logger` | Логгер с уровнями, префиксом и таймстампом |
 | `JwtAuthManager` | Менеджер JWT-авторизации для нескольких бэкендов — хранение, истечение, заголовки, подписки |
 
-Также экспортирует типы: `StorageOptions`, `TypedStorageConfig`, `LogLevel`, `LoggerOptions`, `JwtAuthTargetConfig`, `JwtAuthEvent`, `JwtPayload`, `JwtStorageAdapter`.
+Также экспортирует типы: `StorageOptions`, `TypedStorageConfig`, `LogLevel`, `LoggerOptions`, `JwtAuthTargetConfig`, `JwtAuthEvent`, `JwtPayload`.
 
 ### `Result<T, E>`
 
@@ -250,8 +250,8 @@ logger.debug("This will be hidden"); // уровень ниже "info"
 
 | Метод | Сигнатура | Описание |
 |-------|-----------|----------|
-| `constructor` | `(config: { storage: JwtStorageAdapter; targets?: JwtAuthTargetConfig[] }) => JwtAuthManager` | Создать менеджер с хранилищем и опциональными целями |
-| `registerTarget` | `(config: JwtAuthTargetConfig) => void` | Зарегистрировать новую цель авторизации |
+| `constructor` | `(config: { targets: Record<T, JwtAuthTargetConfig> }) => JwtAuthManager<T>` | Создать менеджер с объектом targets; T выводится из ключей, setToken/getToken используют типизированные id |
+| `registerTarget` | `(id: T, config: JwtAuthTargetConfig) => void` | Зарегистрировать новую цель авторизации |
 | `setToken` | `(targetId: string, token: string) => void` | Сохранить токен для цели |
 | `getToken` | `(targetId: string) => string \| null` | Получить токен для цели |
 | `removeToken` | `(targetId: string) => void` | Удалить токен для цели |
@@ -268,19 +268,19 @@ logger.debug("This will be hidden"); // уровень ниже "info"
 `JwtAuthEvent`: `{ type: 'login' \| 'logout' \| 'expired' \| 'refresh'; token?: string; payload?: JwtPayload }`
 
 ```typescript
-import { JwtAuthManager } from "all-you-need/entities";
+import { JwtAuthManager, TypedStorage } from "all-you-need/entities";
 
 const manager = new JwtAuthManager({
-  storage: localStorage,
-  targets: [
-    { id: "api", storageKey: "jwt:api" },
-    {
-      id: "auth",
-      storageKey: "jwt:auth",
+  targets: {
+    api: {
+      storage: new TypedStorage({ adapter: localStorage, prefix: "jwt:api:" }),
+    },
+    auth: {
+      storage: new TypedStorage({ adapter: localStorage, prefix: "jwt:auth:" }),
       headerName: "X-Auth-Token",
       headerFormat: (t) => t,
     },
-  ],
+  },
 });
 
 manager.subscribe("api", (event) => {

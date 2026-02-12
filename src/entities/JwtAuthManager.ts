@@ -1,8 +1,4 @@
-export interface JwtStorageAdapter {
-  getItem(key: string): string | null
-  setItem(key: string, value: string): void
-  removeItem(key: string): void
-}
+import type { TypedStorage } from './Storage'
 
 export type JwtAuthEvent =
   | { type: 'login'; token: string; payload?: JwtPayload }
@@ -17,10 +13,10 @@ export interface JwtPayload {
   [key: string]: unknown
 }
 
+const TOKEN_KEY = 'token'
+
 export interface JwtAuthTargetConfig {
-  id: string
-  storageKey: string
-  storage?: JwtStorageAdapter
+  storage: TypedStorage
   headerName?: string
   headerFormat?: (token: string) => string
 }
@@ -75,30 +71,30 @@ export function isJwtExpired(token: string, leewaySeconds = 0): boolean {
 
 type JwtAuthCallback = (event: JwtAuthEvent) => void
 
-export class JwtAuthManager {
-  private readonly defaultStorage: JwtStorageAdapter
+export class JwtAuthManager<T extends string = string> {
   private readonly targets = new Map<string, JwtAuthTargetConfig>()
   private readonly subscribers = new Map<string, Set<JwtAuthCallback>>()
 
-  constructor(config: {
-    storage: JwtStorageAdapter
-    targets?: JwtAuthTargetConfig[]
-  }) {
-    this.defaultStorage = config.storage
-
-    for (const target of config.targets ?? []) {
-      this.registerTarget(target)
+  constructor(config: { targets: Record<T, JwtAuthTargetConfig> }) {
+    for (const [id, target] of Object.entries(
+      config.targets,
+    ) as [T, JwtAuthTargetConfig][]) {
+      this.targets.set(id, target)
     }
   }
 
-  registerTarget(config: JwtAuthTargetConfig): void {
-    this.targets.set(config.id, config)
+  registerTarget(id: T, config: JwtAuthTargetConfig): void {
+    this.targets.set(id, config)
   }
 
-  private getStorage(targetId: string): JwtStorageAdapter {
+  private getStorage(targetId: string): TypedStorage {
     const target = this.targets.get(targetId)
 
-    return target?.storage ?? this.defaultStorage
+    if (!target) {
+      throw new Error(`JwtAuthManager: target "${targetId}" is not registered`)
+    }
+
+    return target.storage
   }
 
   private getTarget(targetId: string): JwtAuthTargetConfig | undefined {
@@ -115,7 +111,7 @@ export class JwtAuthManager {
     }
   }
 
-  setToken(targetId: string, token: string): void {
+  setToken(targetId: T, token: string): void {
     const target = this.getTarget(targetId)
 
     if (!target) {
@@ -123,12 +119,12 @@ export class JwtAuthManager {
     }
 
     const storage = this.getStorage(targetId)
-    storage.setItem(target.storageKey, token)
+    storage.set(TOKEN_KEY, token)
     const payload = decodeJwtPayload(token) ?? undefined
     this.notify(targetId, { type: 'login', token, payload })
   }
 
-  getToken(targetId: string): string | null {
+  getToken(targetId: T): string | null {
     const target = this.getTarget(targetId)
 
     if (!target) {
@@ -137,10 +133,10 @@ export class JwtAuthManager {
 
     const storage = this.getStorage(targetId)
 
-    return storage.getItem(target.storageKey)
+    return storage.get<string>(TOKEN_KEY)
   }
 
-  removeToken(targetId: string): void {
+  removeToken(targetId: T): void {
     const target = this.getTarget(targetId)
 
     if (!target) {
@@ -148,11 +144,11 @@ export class JwtAuthManager {
     }
 
     const storage = this.getStorage(targetId)
-    storage.removeItem(target.storageKey)
+    storage.remove(TOKEN_KEY)
     this.notify(targetId, { type: 'logout' })
   }
 
-  isAuthenticated(targetId: string, leewaySeconds = 0): boolean {
+  isAuthenticated(targetId: T, leewaySeconds = 0): boolean {
     const token = this.getToken(targetId)
 
     if (!token) {
@@ -162,7 +158,7 @@ export class JwtAuthManager {
     return !isJwtExpired(token, leewaySeconds)
   }
 
-  isExpired(targetId: string, leewaySeconds = 0): boolean {
+  isExpired(targetId: T, leewaySeconds = 0): boolean {
     const token = this.getToken(targetId)
 
     if (!token) {
@@ -172,7 +168,7 @@ export class JwtAuthManager {
     return isJwtExpired(token, leewaySeconds)
   }
 
-  getAuthHeaders(targetId: string): Record<string, string> | null {
+  getAuthHeaders(targetId: T): Record<string, string> | null {
     const token = this.getToken(targetId)
 
     if (!token) {
@@ -193,7 +189,7 @@ export class JwtAuthManager {
     }
   }
 
-  getPayload(targetId: string): JwtPayload | null {
+  getPayload(targetId: T): JwtPayload | null {
     const token = this.getToken(targetId)
 
     if (!token) {
@@ -203,7 +199,7 @@ export class JwtAuthManager {
     return decodeJwtPayload(token)
   }
 
-  subscribe(targetId: string, callback: JwtAuthCallback): () => void {
+  subscribe(targetId: T, callback: JwtAuthCallback): () => void {
     const target = this.getTarget(targetId)
 
     if (!target) {
@@ -228,7 +224,7 @@ export class JwtAuthManager {
     }
   }
 
-  refreshToken(targetId: string, token: string): void {
+  refreshToken(targetId: T, token: string): void {
     const target = this.getTarget(targetId)
 
     if (!target) {
@@ -236,12 +232,12 @@ export class JwtAuthManager {
     }
 
     const storage = this.getStorage(targetId)
-    storage.setItem(target.storageKey, token)
+    storage.set(TOKEN_KEY, token)
     const payload = decodeJwtPayload(token) ?? undefined
     this.notify(targetId, { type: 'refresh', token, payload })
   }
 
-  markExpired(targetId: string): void {
+  markExpired(targetId: T): void {
     this.notify(targetId, { type: 'expired' })
   }
 }

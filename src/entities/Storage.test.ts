@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+import { JwtAuthManager } from "./JwtAuthManager";
 import { TypedStorage } from "./Storage";
 
 class MockStorage implements Storage {
@@ -256,6 +257,31 @@ describe("TypedStorage", () => {
       prefixedStorage.set("exists", true);
       expect(prefixedStorage.has("exists")).toBe(true);
       expect(prefixedStorage.has("nope")).toBe(false);
+    });
+  });
+
+  describe("with JwtAuthManager", () => {
+    const validToken =
+      "eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjIwMDAwMDAwMDAsImlhdCI6MTAwMDAwMDAwMCwic3ViIjoidXNlcjEifQ.signature";
+
+    it("each target has its own TypedStorage", () => {
+      const mainStorage = new TypedStorage({ adapter, prefix: "auth:" });
+      const manager = new JwtAuthManager({
+        targets: { main: { storage: mainStorage } },
+      });
+
+      manager.setToken("main", validToken);
+
+      expect(manager.getToken("main")).toBe(validToken);
+      expect(manager.isAuthenticated("main")).toBe(true);
+      expect(mainStorage.get<string>("token")).toBe(validToken);
+      expect(adapter.getItem("auth:token")).not.toBeNull();
+
+      manager.removeToken("main");
+
+      expect(manager.getToken("main")).toBeNull();
+      expect(manager.isAuthenticated("main")).toBe(false);
+      expect(mainStorage.has("token")).toBe(false);
     });
   });
 });

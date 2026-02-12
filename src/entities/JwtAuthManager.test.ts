@@ -6,6 +6,7 @@ import {
   JwtAuthManager,
   type JwtAuthEvent,
 } from './JwtAuthManager'
+import { TypedStorage } from './Storage'
 
 // Valid JWT: header.payload.signature (payload: { exp: 2000000000, iat: 1000000000, sub: "user1" })
 // exp 2000000000 = 2033-05-18
@@ -18,21 +19,34 @@ const expiredToken =
 const noExpToken =
   'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyMSJ9.signature'
 
-function createMockStorage(): {
-  store: Map<string, string>
-  adapter: { getItem: (k: string) => string | null; setItem: (k: string, v: string) => void; removeItem: (k: string) => void }
-} {
-  const store = new Map<string, string>()
+class MockStorage implements Storage {
+  private store = new Map<string, string>()
 
-  return {
-    store,
-    adapter: {
-      getItem: (k) => store.get(k) ?? null,
-      setItem: (k, v) => store.set(k, v),
-      removeItem: (k) => store.delete(k),
-    },
+  get length(): number {
+    return this.store.size
+  }
+
+  clear(): void {
+    this.store.clear()
+  }
+
+  getItem(key: string): string | null {
+    return this.store.get(key) ?? null
+  }
+
+  key(index: number): string | null {
+    return [...this.store.keys()][index] ?? null
+  }
+
+  removeItem(key: string): void {
+    this.store.delete(key)
+  }
+
+  setItem(key: string, value: string): void {
+    this.store.set(key, value)
   }
 }
+
 
 describe('decodeJwtPayload', () => {
   it('decodes valid JWT payload', () => {
@@ -66,25 +80,22 @@ describe('isJwtExpired', () => {
 })
 
 describe('JwtAuthManager', () => {
-  let storage: ReturnType<typeof createMockStorage>
-  let manager: JwtAuthManager
+  let adapter: MockStorage
+  let manager: JwtAuthManager<'api' | 'auth'>
 
   beforeEach(() => {
-    storage = createMockStorage()
+    adapter = new MockStorage()
     manager = new JwtAuthManager({
-      storage: storage.adapter,
-      targets: [
-        {
-          id: 'api',
-          storageKey: 'jwt:api',
+      targets: {
+        api: {
+          storage: new TypedStorage({ adapter, prefix: 'jwt:api:' }),
         },
-        {
-          id: 'auth',
-          storageKey: 'jwt:auth',
+        auth: {
+          storage: new TypedStorage({ adapter, prefix: 'jwt:auth:' }),
           headerName: 'X-Auth-Token',
           headerFormat: (t) => t,
         },
-      ],
+      },
     })
   })
 
@@ -97,17 +108,20 @@ describe('JwtAuthManager', () => {
       manager.setToken('api', validToken)
 
       expect(manager.getToken('api')).toBe(validToken)
-      expect(storage.store.get('jwt:api')).toBe(validToken)
+      expect(
+        new TypedStorage({ adapter, prefix: 'jwt:api:' }).get<string>('token'),
+      ).toBe(validToken)
     })
   })
 
   describe('removeToken', () => {
     it('removes token from storage', () => {
+      const apiStorage = new TypedStorage({ adapter, prefix: 'jwt:api:' })
       manager.setToken('api', validToken)
       manager.removeToken('api')
 
       expect(manager.getToken('api')).toBeNull()
-      expect(storage.store.has('jwt:api')).toBe(false)
+      expect(apiStorage.has('token')).toBe(false)
     })
   })
 
@@ -223,17 +237,6 @@ describe('JwtAuthManager', () => {
       manager.setToken('api', validToken)
 
       expect(cb).not.toHaveBeenCalled()
-    })
-  })
-
-  describe('registerTarget', () => {
-    it('allows registering target after construction', () => {
-      const m = new JwtAuthManager({ storage: storage.adapter })
-      m.registerTarget({ id: 'new', storageKey: 'jwt:new' })
-
-      m.setToken('new', validToken)
-
-      expect(m.getToken('new')).toBe(validToken)
     })
   })
 })

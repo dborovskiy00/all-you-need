@@ -5,10 +5,13 @@ export { Stack } from "./Stack";
 export { Logger } from "./Logger";
 export type { LogLevel, LoggerOptions } from "./Logger";
 export { Result } from "./Result";
-export { JwtAuthManager, decodeJwtPayload, isJwtExpired } from "./JwtAuthManager";
+export {
+  JwtAuthManager,
+  decodeJwtPayload,
+  isJwtExpired,
+} from "./JwtAuthManager";
 export type {
   JwtAuthEvent,
   JwtAuthTargetConfig,
   JwtPayload,
-  JwtStorageAdapter,
 } from "./JwtAuthManager";

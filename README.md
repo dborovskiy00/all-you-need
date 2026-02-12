@@ -114,7 +114,7 @@ import type { DeepPartial, Nullable, Merge } from "all-you-need/types";
 | `Logger` | Leveled logger with prefix, timestamp, and configurable log levels |
 | `JwtAuthManager` | JWT auth manager for multiple backends — storage, expiration, headers, subscriptions |
 
-Also exports types: `StorageOptions`, `TypedStorageConfig`, `LogLevel`, `LoggerOptions`, `JwtAuthTargetConfig`, `JwtAuthEvent`, `JwtPayload`, `JwtStorageAdapter`.
+Also exports types: `StorageOptions`, `TypedStorageConfig`, `LogLevel`, `LoggerOptions`, `JwtAuthTargetConfig`, `JwtAuthEvent`, `JwtPayload`.
 
 ### `Result<T, E>`
 
@@ -250,37 +250,37 @@ Manages JWT authentication for multiple targets (e.g. multiple backends). Handle
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `constructor` | `(config: { storage: JwtStorageAdapter; targets?: JwtAuthTargetConfig[] }) => JwtAuthManager` | Create manager with storage and optional targets |
-| `registerTarget` | `(config: JwtAuthTargetConfig) => void` | Register a new auth target |
-| `setToken` | `(targetId: string, token: string) => void` | Store token for a target |
-| `getToken` | `(targetId: string) => string \| null` | Get token for a target |
-| `removeToken` | `(targetId: string) => void` | Remove token for a target |
-| `isAuthenticated` | `(targetId: string, leewaySeconds?: number) => boolean` | Check if target has valid non-expired token |
-| `isExpired` | `(targetId: string, leewaySeconds?: number) => boolean` | Check if target's token is expired |
-| `getAuthHeaders` | `(targetId: string) => Record<string, string> \| null` | Get headers for HTTP request |
-| `getPayload` | `(targetId: string) => JwtPayload \| null` | Get decoded JWT payload |
-| `subscribe` | `(targetId: string, callback: (event: JwtAuthEvent) => void) => () => void` | Subscribe to auth changes; returns unsubscribe function |
-| `refreshToken` | `(targetId: string, token: string) => void` | Update token (emits `refresh` event) |
-| `markExpired` | `(targetId: string) => void` | Mark token as expired (e.g. on 401 response) |
+| `constructor` | `(config: { targets: Record<T, JwtAuthTargetConfig> }) => JwtAuthManager<T>` | Create manager with targets object; T inferred from keys, setToken/getToken etc. use typed target ids |
+| `registerTarget` | `(id: T, config: JwtAuthTargetConfig) => void` | Register a new auth target |
+| `setToken` | `(targetId: T, token: string) => void` | Store token for a target |
+| `getToken` | `(targetId: T) => string \| null` | Get token for a target |
+| `removeToken` | `(targetId: T) => void` | Remove token for a target |
+| `isAuthenticated` | `(targetId: T, leewaySeconds?: number) => boolean` | Check if target has valid non-expired token |
+| `isExpired` | `(targetId: T, leewaySeconds?: number) => boolean` | Check if target's token is expired |
+| `getAuthHeaders` | `(targetId: T) => Record<string, string> \| null` | Get headers for HTTP request |
+| `getPayload` | `(targetId: T) => JwtPayload \| null` | Get decoded JWT payload |
+| `subscribe` | `(targetId: T, callback: (event: JwtAuthEvent) => void) => () => void` | Subscribe to auth changes; returns unsubscribe function |
+| `refreshToken` | `(targetId: T, token: string) => void` | Update token (emits `refresh` event) |
+| `markExpired` | `(targetId: T) => void` | Mark token as expired (e.g. on 401 response) |
 
 **Utilities:** `decodeJwtPayload(token)`, `isJwtExpired(token, leewaySeconds?)`
 
 `JwtAuthEvent`: `{ type: 'login' \| 'logout' \| 'expired' \| 'refresh'; token?: string; payload?: JwtPayload }`
 
 ```typescript
-import { JwtAuthManager } from "all-you-need/entities";
+import { JwtAuthManager, TypedStorage } from "all-you-need/entities";
 
 const manager = new JwtAuthManager({
-  storage: localStorage,
-  targets: [
-    { id: "api", storageKey: "jwt:api" },
-    {
-      id: "auth",
-      storageKey: "jwt:auth",
+  targets: {
+    api: {
+      storage: new TypedStorage({ adapter: localStorage, prefix: "jwt:api:" }),
+    },
+    auth: {
+      storage: new TypedStorage({ adapter: localStorage, prefix: "jwt:auth:" }),
       headerName: "X-Auth-Token",
       headerFormat: (t) => t,
     },
-  ],
+  },
 });
 
 manager.subscribe("api", (event) => {
@@ -289,7 +289,7 @@ manager.subscribe("api", (event) => {
   }
 });
 
-manager.setToken("api", response.access_token);
+manager.setToken("api", response.access_token); // targetId typed as "api" | "auth"
 const headers = manager.getAuthHeaders("api"); // { Authorization: "Bearer ..." }
 ```
 
