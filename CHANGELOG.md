@@ -1,3 +1,16 @@
+# [2.0.0](https://github.com/dborovskiy00/all-you-need/compare/v1.0.0...v2.0.0) (2026-02-16)
+
+
+### Features
+
+* refactor JWT auth and API entities ([6c19250](https://github.com/dborovskiy00/all-you-need/commit/6c1925012cc75dfdceb69c873a1c273f876a56be))
+
+
+### BREAKING CHANGES
+
+* - JwtAuthManager: targets now accept Record<T, JwtAuthTarget> (instances)
+  instead of Record<T, JwtAuthTargetConfig>. Create JwtAuthTarget explicitly.
+
 # [1.0.0](https://github.com/dborovskiy00/all-you-need/compare/v0.3.0...v1.0.0) (2026-02-12)
 
 
