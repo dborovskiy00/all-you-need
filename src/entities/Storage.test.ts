@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { JwtAuthManager } from "./JwtAuthManager";
+import { JwtAuthManager, JwtAuthTarget } from "./JwtAuthManager";
 import { TypedStorage } from "./Storage";
 
 class MockStorage implements Storage {
@@ -267,7 +267,7 @@ describe("TypedStorage", () => {
     it("each target has its own TypedStorage", () => {
       const mainStorage = new TypedStorage({ adapter, prefix: "auth:" });
       const manager = new JwtAuthManager({
-        targets: { main: { storage: mainStorage } },
+        targets: { main: new JwtAuthTarget({ storage: mainStorage }) },
       });
 
       manager.setToken("main", validToken);

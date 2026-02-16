@@ -1,23 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
-  decodeJwtPayload,
-  isJwtExpired,
   JwtAuthManager,
+  JwtAuthTarget,
   type JwtAuthEvent,
+  type JwtPayload,
 } from './JwtAuthManager'
 import { TypedStorage } from './Storage'
 
-// Valid JWT: header.payload.signature (payload: { exp: 2000000000, iat: 1000000000, sub: "user1" })
-// exp 2000000000 = 2033-05-18
 const validToken =
   'eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjIwMDAwMDAwMDAsImlhdCI6MTAwMDAwMDAwMCwic3ViIjoidXNlcjEifQ.signature'
-// Expired JWT: exp 1 = 1970-01-01
 const expiredToken =
   'eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjEsImlhdCI6OTAwMDAwMDAwLCJzdWIiOiJ1c2VyMSJ9.sig'
-// Token without exp
-const noExpToken =
-  'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyMSJ9.signature'
 
 class MockStorage implements Storage {
   private store = new Map<string, string>()
@@ -47,118 +41,167 @@ class MockStorage implements Storage {
   }
 }
 
-
-describe('decodeJwtPayload', () => {
-  it('decodes valid JWT payload', () => {
-    const payload = decodeJwtPayload(validToken)
-
-    expect(payload).toEqual({
-      exp: 2_000_000_000,
-      iat: 1_000_000_000,
-      sub: 'user1',
-    })
-  })
-
-  it('returns null for invalid token', () => {
-    expect(decodeJwtPayload('invalid')).toBeNull()
-    expect(decodeJwtPayload('a.b')).toBeNull()
-  })
-})
-
-describe('isJwtExpired', () => {
-  it('returns false for valid token', () => {
-    expect(isJwtExpired(validToken)).toBe(false)
-  })
-
-  it('returns true for expired token', () => {
-    expect(isJwtExpired(expiredToken)).toBe(true)
-  })
-
-  it('returns false when payload has no exp', () => {
-    expect(isJwtExpired(noExpToken)).toBe(false)
-  })
-})
-
 describe('JwtAuthManager', () => {
+  function createManager() {
+    const adapter = new MockStorage()
+
+    return {
+      adapter,
+      manager: new JwtAuthManager({
+        targets: {
+          api: new JwtAuthTarget({
+            storage: new TypedStorage({ adapter, prefix: 'jwt:api:' }),
+          }),
+          auth: new JwtAuthTarget({
+            storage: new TypedStorage({ adapter, prefix: 'jwt:auth:' }),
+            headersFormat: (token) => ({ 'X-Auth-Token': token }),
+          }),
+        },
+      }),
+    }
+  }
+
   let adapter: MockStorage
-  let manager: JwtAuthManager<'api' | 'auth'>
+  let manager: ReturnType<typeof createManager>['manager']
 
   beforeEach(() => {
-    adapter = new MockStorage()
-    manager = new JwtAuthManager({
-      targets: {
-        api: {
-          storage: new TypedStorage({ adapter, prefix: 'jwt:api:' }),
-        },
-        auth: {
-          storage: new TypedStorage({ adapter, prefix: 'jwt:auth:' }),
-          headerName: 'X-Auth-Token',
-          headerFormat: (t) => t,
-        },
-      },
-    })
+    const mocks = createManager()
+    adapter = mocks.adapter
+    manager = mocks.manager
   })
 
   afterEach(() => {
     vi.clearAllMocks()
   })
 
+  describe('getTargetIds', () => {
+    it('returns all target ids', () => {
+      expect(manager.getTargetIds()).toEqual(['api', 'auth'])
+    })
+  })
+
+  describe('hasTarget', () => {
+    it('returns true for registered target', () => {
+      expect(manager.hasTarget('api')).toBe(true)
+      expect(manager.hasTarget('auth')).toBe(true)
+    })
+
+    it('returns false for unregistered target', () => {
+      expect(manager.hasTarget('other' as never)).toBe(false)
+    })
+  })
+
+  describe('getTarget', () => {
+    it('returns target when exists', () => {
+      const target = manager.getTarget('api')
+      expect(target).toBeInstanceOf(JwtAuthTarget)
+    })
+
+    it('returns undefined when target does not exist', () => {
+      expect(manager.getTarget('other' as never)).toBeUndefined()
+    })
+  })
+
+  describe('getTargetOrThrow', () => {
+    it('returns target when exists', () => {
+      const target = manager.getTargetOrThrow('api')
+      expect(target).toBeInstanceOf(JwtAuthTarget)
+    })
+
+    it('throws when target does not exist', () => {
+      expect(() => manager.getTargetOrThrow('other' as never)).toThrow(
+        'JwtAuthManager: target "other" is not registered',
+      )
+    })
+  })
+
   describe('setToken / getToken', () => {
-    it('stores and retrieves token', () => {
+    it('stores and retrieves token per target', () => {
       manager.setToken('api', validToken)
 
       expect(manager.getToken('api')).toBe(validToken)
+      expect(manager.getToken('auth')).toBeNull()
       expect(
         new TypedStorage({ adapter, prefix: 'jwt:api:' }).get<string>('token'),
       ).toBe(validToken)
     })
+
+    it('setToken throws for unknown target', () => {
+      expect(() => manager.setToken('other' as never, validToken)).toThrow(
+        'JwtAuthManager: target "other" is not registered',
+      )
+    })
   })
 
   describe('removeToken', () => {
-    it('removes token from storage', () => {
-      const apiStorage = new TypedStorage({ adapter, prefix: 'jwt:api:' })
+    it('removes token and refresh token from target', () => {
       manager.setToken('api', validToken)
+      manager.setRefreshToken('api', 'refresh-123')
+
       manager.removeToken('api')
 
       expect(manager.getToken('api')).toBeNull()
-      expect(apiStorage.has('token')).toBe(false)
+      expect(manager.getRefreshToken('api')).toBeNull()
+    })
+  })
+
+  describe('setRefreshToken / getRefreshToken / removeRefreshToken', () => {
+    it('stores and retrieves refresh token', () => {
+      manager.setToken('api', validToken)
+      manager.setRefreshToken('api', 'refresh-123')
+
+      expect(manager.getRefreshToken('api')).toBe('refresh-123')
+    })
+
+    it('removeRefreshToken clears refresh token only', () => {
+      manager.setToken('api', validToken)
+      manager.setRefreshToken('api', 'refresh-123')
+
+      manager.removeRefreshToken('api')
+
+      expect(manager.getToken('api')).toBe(validToken)
+      expect(manager.getRefreshToken('api')).toBeNull()
     })
   })
 
   describe('isAuthenticated', () => {
     it('returns true when token is valid', () => {
       manager.setToken('api', validToken)
-
       expect(manager.isAuthenticated('api')).toBe(true)
     })
 
     it('returns false when token is expired', () => {
       manager.setToken('api', expiredToken)
-
       expect(manager.isAuthenticated('api')).toBe(false)
     })
 
     it('returns false when no token', () => {
       expect(manager.isAuthenticated('api')).toBe(false)
     })
+
+    it('returns false for unknown target', () => {
+      expect(manager.isAuthenticated('other' as never)).toBe(false)
+    })
   })
 
   describe('isExpired', () => {
     it('returns false when token is valid', () => {
       manager.setToken('api', validToken)
-
       expect(manager.isExpired('api')).toBe(false)
     })
 
     it('returns true when token is expired', () => {
       manager.setToken('api', expiredToken)
-
       expect(manager.isExpired('api')).toBe(true)
+    })
+
+    it('returns true for unknown target', () => {
+      expect(manager.isExpired('other' as never)).toBe(true)
     })
   })
 
   describe('getAuthHeaders', () => {
-    it('returns Bearer header for default target', () => {
+    it('returns default Bearer for target without headersFormat', () => {
       manager.setToken('api', validToken)
 
       expect(manager.getAuthHeaders('api')).toEqual({
@@ -166,7 +209,7 @@ describe('JwtAuthManager', () => {
       })
     })
 
-    it('returns custom header format for configured target', () => {
+    it('returns custom format for target with headersFormat', () => {
       manager.setToken('auth', validToken)
 
       expect(manager.getAuthHeaders('auth')).toEqual({
@@ -174,14 +217,31 @@ describe('JwtAuthManager', () => {
       })
     })
 
-    it('returns null when no token', () => {
-      expect(manager.getAuthHeaders('api')).toBeNull()
+    it('returns undefined when no token', () => {
+      expect(manager.getAuthHeaders('api')).toBeUndefined()
+    })
+  })
+
+  describe('getPayload', () => {
+    it('returns decoded payload when token exists', () => {
+      manager.setToken('api', validToken)
+
+      expect(manager.getPayload('api')).toMatchObject({
+        exp: 2_000_000_000,
+        iat: 1_000_000_000,
+        sub: 'user1',
+      })
+    })
+
+    it('returns null/undefined when no token', () => {
+      const result = manager.getPayload('api')
+      expect(result === null || result === undefined).toBe(true)
     })
   })
 
   describe('subscribe', () => {
     it('notifies on setToken (login)', () => {
-      const cb = vi.fn<(event: JwtAuthEvent) => void>()
+      const cb = vi.fn<(event: JwtAuthEvent<JwtPayload>) => void>()
       manager.subscribe('api', cb)
 
       manager.setToken('api', validToken)
@@ -194,7 +254,7 @@ describe('JwtAuthManager', () => {
     })
 
     it('notifies on removeToken (logout)', () => {
-      const cb = vi.fn<(event: JwtAuthEvent) => void>()
+      const cb = vi.fn<(event: JwtAuthEvent<JwtPayload>) => void>()
       manager.setToken('api', validToken)
       manager.subscribe('api', cb)
 
@@ -204,7 +264,7 @@ describe('JwtAuthManager', () => {
     })
 
     it('notifies on refreshToken', () => {
-      const cb = vi.fn<(event: JwtAuthEvent) => void>()
+      const cb = vi.fn<(event: JwtAuthEvent<JwtPayload>) => void>()
       manager.setToken('api', validToken)
       manager.subscribe('api', cb)
       cb.mockClear()
@@ -219,7 +279,7 @@ describe('JwtAuthManager', () => {
     })
 
     it('notifies on markExpired', () => {
-      const cb = vi.fn<(event: JwtAuthEvent) => void>()
+      const cb = vi.fn<(event: JwtAuthEvent<JwtPayload>) => void>()
       manager.setToken('api', validToken)
       manager.subscribe('api', cb)
       cb.mockClear()
@@ -229,14 +289,45 @@ describe('JwtAuthManager', () => {
       expect(cb).toHaveBeenCalledWith({ type: 'expired' })
     })
 
-    it('unsubscribes correctly', () => {
-      const cb = vi.fn<(event: JwtAuthEvent) => void>()
+    it('returns unsubscribe that stops notifications', () => {
+      const cb = vi.fn<(event: JwtAuthEvent<JwtPayload>) => void>()
       const unsub = manager.subscribe('api', cb)
 
       unsub()
       manager.setToken('api', validToken)
 
       expect(cb).not.toHaveBeenCalled()
+    })
+
+    it('throws for unknown target', () => {
+      const cb = vi.fn()
+
+      expect(() => manager.subscribe('other' as never, cb)).toThrow(
+        'JwtAuthManager: target "other" is not registered',
+      )
+    })
+  })
+
+  describe('refreshToken', () => {
+    it('updates token for target', () => {
+      manager.setToken('api', expiredToken)
+
+      manager.refreshToken('api', validToken)
+
+      expect(manager.getToken('api')).toBe(validToken)
+    })
+  })
+
+  describe('markExpired', () => {
+    it('notifies subscribers without removing token', () => {
+      const cb = vi.fn<(event: JwtAuthEvent<JwtPayload>) => void>()
+      manager.setToken('api', validToken)
+      manager.subscribe('api', cb)
+
+      manager.markExpired('api')
+
+      expect(cb).toHaveBeenCalledWith({ type: 'expired' })
+      expect(manager.getToken('api')).toBe(validToken)
     })
   })
 })

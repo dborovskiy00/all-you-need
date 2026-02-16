@@ -1,243 +1,119 @@
-import type { TypedStorage } from './Storage'
+import {
+  JwtAuthCallback,
+  JwtAuthTarget,
+  type JwtPayload,
+} from './JwtAuthTarget'
 
-export type JwtAuthEvent =
-  | { type: 'login'; token: string; payload?: JwtPayload }
-  | { type: 'logout' }
-  | { type: 'expired' }
-  | { type: 'refresh'; token: string; payload?: JwtPayload }
+export type { JwtAuthEvent, JwtAuthTargetConfig, JwtPayload } from './JwtAuthTarget'
+export {
+  decodeJwtPayload,
+  isJwtExpired,
+  JwtAuthTarget,
+} from './JwtAuthTarget'
 
-export interface JwtPayload {
-  exp?: number
-  iat?: number
-  sub?: string
-  [key: string]: unknown
-}
+export type TargetPayload<TTarget extends JwtAuthTarget<JwtPayload, Record<string, string>>> =
+  TTarget extends JwtAuthTarget<infer TPayload, Record<string, string>> ? TPayload : never;
 
-const TOKEN_KEY = 'token'
+export type TargetHeaders<TTarget extends JwtAuthTarget<JwtPayload, Record<string, string>>> =
+  TTarget extends JwtAuthTarget<JwtPayload, infer THeaders> ? THeaders : never;
 
-export interface JwtAuthTargetConfig {
-  storage: TypedStorage
-  headerName?: string
-  headerFormat?: (token: string) => string
-}
+export class JwtAuthManager<
+  TTargets extends Record<
+    string,
+    JwtAuthTarget<JwtPayload, Record<string, string>>
+  >,
+> {
+  private readonly targets = new Map<keyof TTargets, TTargets[keyof TTargets]>()
 
-const DEFAULT_HEADER_NAME = 'Authorization'
-const DEFAULT_HEADER_FORMAT = (token: string): string => `Bearer ${token}`
-
-function base64UrlDecode(str: string): string {
-  let base64 = str.replace(/-/g, '+').replace(/_/g, '/')
-  const pad = base64.length % 4
-
-  if (pad) {
-    base64 += '='.repeat(4 - pad)
-  }
-
-  try {
-    return atob(base64)
-  } catch {
-    return ''
-  }
-}
-
-export function decodeJwtPayload(token: string): JwtPayload | null {
-  const parts = token.split('.')
-
-  if (parts.length !== 3) {
-    return null
-  }
-
-  try {
-    const payloadStr = base64UrlDecode(parts[1]!)
-
-    if (!payloadStr) {
-      return null
-    }
-
-    return JSON.parse(payloadStr) as JwtPayload
-  } catch {
-    return null
-  }
-}
-
-export function isJwtExpired(token: string, leewaySeconds = 0): boolean {
-  const payload = decodeJwtPayload(token)
-
-  if (!payload?.exp) {
-    return false
-  }
-
-  return Date.now() >= (payload.exp + leewaySeconds) * 1000
-}
-
-type JwtAuthCallback = (event: JwtAuthEvent) => void
-
-export class JwtAuthManager<T extends string = string> {
-  private readonly targets = new Map<string, JwtAuthTargetConfig>()
-  private readonly subscribers = new Map<string, Set<JwtAuthCallback>>()
-
-  constructor(config: { targets: Record<T, JwtAuthTargetConfig> }) {
-    for (const [id, target] of Object.entries(
-      config.targets,
-    ) as [T, JwtAuthTargetConfig][]) {
-      this.targets.set(id, target)
+  constructor(config: { targets: TTargets }) {
+    for (const [id, target] of Object.entries(config.targets)) {
+      this.targets.set(id as keyof TTargets, target as TTargets[keyof TTargets])
     }
   }
 
-  registerTarget(id: T, config: JwtAuthTargetConfig): void {
-    this.targets.set(id, config)
+  getTargetIds(): (keyof TTargets)[] {
+    return Array.from(this.targets.keys()) as (keyof TTargets)[]
   }
 
-  private getStorage(targetId: string): TypedStorage {
+  hasTarget<TKey extends keyof TTargets>(targetId: TKey): boolean {
+    return this.targets.has(targetId)
+  }
+
+  getTarget<TKey extends keyof TTargets>(targetId: TKey): TTargets[TKey] | undefined {
+    return this.targets.get(targetId) as TTargets[TKey] ?? undefined;
+  }
+
+  getTargetOrThrow<TKey extends keyof TTargets>(targetId: TKey): TTargets[TKey] {
     const target = this.targets.get(targetId)
 
     if (!target) {
-      throw new Error(`JwtAuthManager: target "${targetId}" is not registered`)
+      throw new Error(`JwtAuthManager: target "${targetId.toString()}" is not registered`)
     }
 
-    return target.storage
+    return target as TTargets[TKey];
   }
 
-  private getTarget(targetId: string): JwtAuthTargetConfig | undefined {
-    return this.targets.get(targetId)
+  setToken<TKey extends keyof TTargets>(targetId: TKey, token: string): void {
+    this.getTargetOrThrow(targetId).setToken(token)
   }
 
-  private notify(targetId: string, event: JwtAuthEvent): void {
-    const callbacks = this.subscribers.get(targetId)
-
-    if (callbacks) {
-      for (const cb of callbacks) {
-        cb(event)
-      }
-    }
+  getToken<TKey extends keyof TTargets>(targetId: TKey): string | null {
+    return (this.targets.get(targetId) as TTargets[TKey])?.getToken() ?? null
   }
 
-  setToken(targetId: T, token: string): void {
-    const target = this.getTarget(targetId)
+  getRefreshToken<TKey extends keyof TTargets>(targetId: TKey): string | null {
+    return this.targets.get(targetId)?.getRefreshToken() ?? null
+  }
+
+  setRefreshToken<TKey extends keyof TTargets>(targetId: TKey, token: string): void {
+    this.getTargetOrThrow(targetId).setRefreshToken(token)
+  }
+
+  removeRefreshToken<TKey extends keyof TTargets>(targetId: TKey): void {
+    this.targets.get(targetId)?.removeRefreshToken()
+  }
+
+  removeToken<TKey extends keyof TTargets>(targetId: TKey): void {
+    this.targets.get(targetId)?.removeToken()
+  }
+
+  isAuthenticated<TKey extends keyof TTargets>(targetId: TKey, leewaySeconds = 0): boolean {
+    const target = this.targets.get(targetId)
 
     if (!target) {
-      throw new Error(`JwtAuthManager: target "${targetId}" is not registered`)
-    }
-
-    const storage = this.getStorage(targetId)
-    storage.set(TOKEN_KEY, token)
-    const payload = decodeJwtPayload(token) ?? undefined
-    this.notify(targetId, { type: 'login', token, payload })
-  }
-
-  getToken(targetId: T): string | null {
-    const target = this.getTarget(targetId)
-
-    if (!target) {
-      return null
-    }
-
-    const storage = this.getStorage(targetId)
-
-    return storage.get<string>(TOKEN_KEY)
-  }
-
-  removeToken(targetId: T): void {
-    const target = this.getTarget(targetId)
-
-    if (!target) {
-      return
-    }
-
-    const storage = this.getStorage(targetId)
-    storage.remove(TOKEN_KEY)
-    this.notify(targetId, { type: 'logout' })
-  }
-
-  isAuthenticated(targetId: T, leewaySeconds = 0): boolean {
-    const token = this.getToken(targetId)
-
-    if (!token) {
       return false
     }
 
-    return !isJwtExpired(token, leewaySeconds)
+    return target.isAuthenticated(leewaySeconds)
   }
 
-  isExpired(targetId: T, leewaySeconds = 0): boolean {
-    const token = this.getToken(targetId)
+  isExpired<TKey extends keyof TTargets>(targetId: TKey, leewaySeconds = 0): boolean {
+    const target = this.targets.get(targetId)
 
-    if (!token) {
+    if (!target) {
       return true
     }
 
-    return isJwtExpired(token, leewaySeconds)
+    return target.isExpired(leewaySeconds)
   }
 
-  getAuthHeaders(targetId: T): Record<string, string> | null {
-    const token = this.getToken(targetId)
-
-    if (!token) {
-      return null
-    }
-
-    const target = this.getTarget(targetId)
-
-    if (!target) {
-      return null
-    }
-
-    const headerName = target.headerName ?? DEFAULT_HEADER_NAME
-    const headerFormat = target.headerFormat ?? DEFAULT_HEADER_FORMAT
-
-    return {
-      [headerName]: headerFormat(token),
-    }
+  getAuthHeaders<TKey extends keyof TTargets>(targetId: TKey): TargetHeaders<TTargets[TKey]> | undefined {
+    return this.targets.get(targetId)?.getAuthHeaders() as TargetHeaders<TTargets[TKey]> ?? undefined
   }
 
-  getPayload(targetId: T): JwtPayload | null {
-    const token = this.getToken(targetId)
-
-    if (!token) {
-      return null
-    }
-
-    return decodeJwtPayload(token)
+  getPayload<TKey extends keyof TTargets>(targetId: TKey): TargetPayload<TTargets[TKey]> | undefined {
+    return this.targets.get(targetId)?.getPayload() as TargetPayload<TTargets[TKey]> ?? null
   }
 
-  subscribe(targetId: T, callback: JwtAuthCallback): () => void {
-    const target = this.getTarget(targetId)
-
-    if (!target) {
-      throw new Error(`JwtAuthManager: target "${targetId}" is not registered`)
-    }
-
-    let callbacks = this.subscribers.get(targetId)
-
-    if (!callbacks) {
-      callbacks = new Set()
-      this.subscribers.set(targetId, callbacks)
-    }
-
-    callbacks.add(callback)
-
-    return () => {
-      callbacks!.delete(callback)
-
-      if (callbacks!.size === 0) {
-        this.subscribers.delete(targetId)
-      }
-    }
+  subscribe<TKey extends keyof TTargets>(targetId: TKey, callback: JwtAuthCallback<TargetPayload<TTargets[TKey]>>): () => void {
+    return this.getTargetOrThrow(targetId).subscribe(callback as JwtAuthCallback<JwtPayload>)
   }
 
-  refreshToken(targetId: T, token: string): void {
-    const target = this.getTarget(targetId)
-
-    if (!target) {
-      throw new Error(`JwtAuthManager: target "${targetId}" is not registered`)
-    }
-
-    const storage = this.getStorage(targetId)
-    storage.set(TOKEN_KEY, token)
-    const payload = decodeJwtPayload(token) ?? undefined
-    this.notify(targetId, { type: 'refresh', token, payload })
+  refreshToken<TKey extends keyof TTargets>(targetId: TKey, token: string): void {
+    this.getTargetOrThrow(targetId).refreshToken(token)
   }
 
-  markExpired(targetId: T): void {
-    this.notify(targetId, { type: 'expired' })
+  markExpired<TKey extends keyof TTargets>(targetId: TKey): void {
+    this.targets.get(targetId)?.markExpired()
   }
 }

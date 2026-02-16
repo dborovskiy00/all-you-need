@@ -112,10 +112,13 @@ import type { DeepPartial, Nullable, Merge } from "all-you-need/types";
 | `Stack<T>` | LIFO stack data structure |
 | `TypedStorage` | Universal typed wrapper for `localStorage`/`sessionStorage` with prefix and TTL |
 | `Logger` | Leveled logger with prefix, timestamp, and configurable log levels |
-| `JwtAuthManager` | JWT auth manager for multiple backends — storage, expiration, headers, subscriptions |
+| `JwtAuthTarget` | Single JWT auth target — storage, token lifecycle, headers format, subscriptions |
+| `JwtAuthManager` | Manages multiple `JwtAuthTarget` instances — setToken, getAuthHeaders, subscribe, etc. |
+| `ApiClient` | Abstract HTTP client; use `FetchApiClient` for fetch-based transport |
+| `ApiManager` | Manages multiple ApiClient instances by typed identifiers |
+| `AuthManager` | Coordinates JwtAuthManager and ApiManager for login, logout, refresh — target IDs must match client IDs |
 
-Also exports types: `StorageOptions`, `TypedStorageConfig`, `LogLevel`, `LoggerOptions`, `JwtAuthTargetConfig`, `JwtAuthEvent`, `JwtPayload`.
-
+Also exports: `FetchApiClient`, `AuthApiClient`, `decodeJwtPayload`, `isJwtExpired`. Types: `StorageOptions`, `TypedStorageConfig`, `LogLevel`, `LoggerOptions`, `JwtAuthTargetConfig`, `JwtAuthEvent`, `JwtPayload`, `TargetPayload`, `TargetHeaders`, `ApiClientConfig`, `ApiRequestConfig`, `ApiResponse`, `CancellableRequest`, `PreparedRequest`, `RequestInterceptor`, `RequestInterceptorConfig`, `ResponseInterceptor`, `ApiManagerConfig`, `AuthManagerConfig`, `AuthTokens`. 
 ### `Result<T, E>`
 
 Monadic error handling — explicit `Ok`/`Err` without exceptions.
@@ -244,42 +247,71 @@ logger.info("Server started");
 logger.debug("This will be hidden"); // level is below "info"
 ```
 
-### `JwtAuthManager`
+### `JwtAuthTarget`
 
-Manages JWT authentication for multiple targets (e.g. multiple backends). Handles storage, expiration check, auth header injection, and subscriptions to auth changes.
+Single JWT auth target. Handles token storage, expiration, auth headers, and subscriptions. Create instances and pass to `JwtAuthManager`.
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `constructor` | `(config: { targets: Record<T, JwtAuthTargetConfig> }) => JwtAuthManager<T>` | Create manager with targets object; T inferred from keys, setToken/getToken etc. use typed target ids |
-| `registerTarget` | `(id: T, config: JwtAuthTargetConfig) => void` | Register a new auth target |
-| `setToken` | `(targetId: T, token: string) => void` | Store token for a target |
-| `getToken` | `(targetId: T) => string \| null` | Get token for a target |
-| `removeToken` | `(targetId: T) => void` | Remove token for a target |
-| `isAuthenticated` | `(targetId: T, leewaySeconds?: number) => boolean` | Check if target has valid non-expired token |
-| `isExpired` | `(targetId: T, leewaySeconds?: number) => boolean` | Check if target's token is expired |
-| `getAuthHeaders` | `(targetId: T) => Record<string, string> \| null` | Get headers for HTTP request |
-| `getPayload` | `(targetId: T) => JwtPayload \| null` | Get decoded JWT payload |
-| `subscribe` | `(targetId: T, callback: (event: JwtAuthEvent) => void) => () => void` | Subscribe to auth changes; returns unsubscribe function |
-| `refreshToken` | `(targetId: T, token: string) => void` | Update token (emits `refresh` event) |
-| `markExpired` | `(targetId: T) => void` | Mark token as expired (e.g. on 401 response) |
+| `constructor` | `(config: JwtAuthTargetConfig<THeaders>) => JwtAuthTarget<TPayload, THeaders>` | Create target with `storage` and optional `headersFormat` |
+| `setToken` | `(token: string) => void` | Store token, notify `login` event |
+| `getToken` | `() => string \| null` | Get stored token |
+| `setRefreshToken` | `(token: string) => void` | Store refresh token |
+| `getRefreshToken` | `() => string \| null` | Get refresh token |
+| `removeRefreshToken` | `() => void` | Remove refresh token |
+| `removeToken` | `() => void` | Remove token and refresh token, notify `logout` |
+| `isAuthenticated` | `(leewaySeconds?: number) => boolean` | Check if valid non-expired token exists |
+| `isExpired` | `(leewaySeconds?: number) => boolean` | Check if token is expired |
+| `getAuthHeaders` | `() => THeaders \| null` | Get headers for HTTP request (default: `Authorization: Bearer <token>`) |
+| `getPayload` | `() => TPayload \| null` | Get decoded JWT payload |
+| `subscribe` | `(callback: (event: JwtAuthEvent) => void) => () => void` | Subscribe to auth changes; returns unsubscribe |
+| `refreshToken` | `(token: string) => void` | Update token, notify `refresh` event |
+| `markExpired` | `() => void` | Notify `expired` event (e.g. on 401) |
 
-**Utilities:** `decodeJwtPayload(token)`, `isJwtExpired(token, leewaySeconds?)`
+`JwtAuthTargetConfig<THeaders>`: `{ storage: TypedStorage, headersFormat?: (token: string) => THeaders }`
+
+### `JwtAuthManager`
+
+Manages multiple `JwtAuthTarget` instances. Accepts a `Record` of targets; target IDs are typed.
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `constructor` | `(config: { targets: Record<T, JwtAuthTarget> }) => JwtAuthManager<T>` | Create manager with target instances |
+| `getTargetIds` | `() => (keyof T)[]` | Get all target IDs |
+| `hasTarget` | `(targetId: T) => boolean` | Check if target exists |
+| `getTarget` | `(targetId: T) => JwtAuthTarget \| undefined` | Get target by id |
+| `getTargetOrThrow` | `(targetId: T) => JwtAuthTarget` | Get target or throw |
+| `registerTarget` | `(id: T, target: JwtAuthTarget) => void` | Add or replace target |
+| `setToken` | `(targetId: T, token: string) => void` | Store token for target |
+| `getToken` | `(targetId: T) => string \| null` | Get token for target |
+| `setRefreshToken` | `(targetId: T, token: string) => void` | Store refresh token |
+| `getRefreshToken` | `(targetId: T) => string \| null` | Get refresh token |
+| `removeRefreshToken` | `(targetId: T) => void` | Remove refresh token |
+| `removeToken` | `(targetId: T) => void` | Remove token for target |
+| `isAuthenticated` | `(targetId: T, leewaySeconds?: number) => boolean` | Check if target has valid token |
+| `isExpired` | `(targetId: T, leewaySeconds?: number) => boolean` | Check if target's token is expired |
+| `getAuthHeaders` | `(targetId: T) => Record<string, string> \| undefined` | Get headers for HTTP request |
+| `getPayload` | `(targetId: T) => JwtPayload \| undefined` | Get decoded JWT payload |
+| `subscribe` | `(targetId: T, callback: (event: JwtAuthEvent) => void) => () => void` | Subscribe to auth changes |
+| `refreshToken` | `(targetId: T, token: string) => void` | Update token for target |
+| `markExpired` | `(targetId: T) => void` | Mark target's token as expired |
+
+**Utilities:** `decodeJwtPayload(token): JwtPayload | null`, `isJwtExpired(token, leewaySeconds?): boolean`
 
 `JwtAuthEvent`: `{ type: 'login' \| 'logout' \| 'expired' \| 'refresh'; token?: string; payload?: JwtPayload }`
 
 ```typescript
-import { JwtAuthManager, TypedStorage } from "all-you-need/entities";
+import { JwtAuthManager, JwtAuthTarget, TypedStorage } from "all-you-need/entities";
 
 const manager = new JwtAuthManager({
   targets: {
-    api: {
+    api: new JwtAuthTarget({
       storage: new TypedStorage({ adapter: localStorage, prefix: "jwt:api:" }),
-    },
-    auth: {
+    }),
+    auth: new JwtAuthTarget({
       storage: new TypedStorage({ adapter: localStorage, prefix: "jwt:auth:" }),
-      headerName: "X-Auth-Token",
-      headerFormat: (t) => t,
-    },
+      headersFormat: (token) => ({ "X-Auth-Token": token }),
+    }),
   },
 });
 
@@ -289,8 +321,166 @@ manager.subscribe("api", (event) => {
   }
 });
 
-manager.setToken("api", response.access_token); // targetId typed as "api" | "auth"
+manager.setToken("api", response.access_token);
 const headers = manager.getAuthHeaders("api"); // { Authorization: "Bearer ..." }
+```
+
+### `ApiClient` / `FetchApiClient`
+
+Abstract base `ApiClient` defines the HTTP interface; subclasses implement transport via `doFetch`. Use `FetchApiClient` for fetch-based instances (default when passing config to ApiManager).
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `constructor` | `(config?: ApiClientConfig) => FetchApiClient` | Create client with baseURL, headers, timeout, credentials, validateStatus |
+| `get` | `<T>(url: string, config?: ApiRequestConfig) => Promise<ApiResponse<T>>` | GET request; use `config: { cancelable: true }` for `CancellableRequest<T>` |
+| `post` | `<T>(url: string, body?: BodyInit \| object, config?: ApiRequestConfig) => Promise<ApiResponse<T>>` | POST request; use `config: { cancelable: true }` for `CancellableRequest<T>` |
+| `put` | `<T>(url: string, body?: BodyInit \| object, config?: ApiRequestConfig) => Promise<ApiResponse<T>>` | PUT request; use `config: { cancelable: true }` for `CancellableRequest<T>` |
+| `patch` | `<T>(url: string, body?: BodyInit \| object, config?: ApiRequestConfig) => Promise<ApiResponse<T>>` | PATCH request; use `config: { cancelable: true }` for `CancellableRequest<T>` |
+| `delete` | `<T>(url: string, config?: ApiRequestConfig) => Promise<ApiResponse<T>>` | DELETE request; use `config: { cancelable: true }` for `CancellableRequest<T>` |
+
+`ApiClientConfig`: `{ baseURL?, headers?, timeout?, credentials?, validateStatus?, requestInterceptors?, responseInterceptors? }`
+
+`ApiRequestConfig`: `{ headers?, timeout?, params?, signal?, cancelable? }` — when `cancelable: true`, returns `CancellableRequest<T>` (do not pass `signal`)
+
+`CancellableRequest<T>`: `{ promise, abort, signal }` — use for cancelable requests; call `abort()` to cancel.
+
+`ApiResponse<T>`: `{ data: T, status, statusText, headers }`
+
+**Interceptors:** Add via config or `useRequestInterceptor(fn)` / `useResponseInterceptor(fn)`. Request interceptor receives `RequestInterceptorConfig` (url, method, headers, body, signal, credentials) and returns the modified config. Response interceptor receives `ApiResponse<T>` and returns the modified response. Both support sync and async. `use*Interceptor` returns an unsubscribe function.
+
+On non-2xx (or custom `validateStatus` failure), throws `ApiError` with `status`, `statusText`, `headers`, `responseBody`.
+
+```typescript
+import { FetchApiClient } from "all-you-need/entities";
+
+const client = new FetchApiClient({
+  baseURL: "https://api.example.com",
+  headers: { "X-Custom": "value" },
+  timeout: 5000,
+});
+
+const { data } = await client.get<User[]>("/users");
+await client.post("/users", { name: "John" });
+
+// With interceptors (e.g. add auth header)
+client.useRequestInterceptor((config) => {
+  config.headers.set("Authorization", `Bearer ${token}`);
+  return config;
+});
+
+// Cancelable request (e.g. on component unmount)
+const req = client.get<User[]>("/users", { cancelable: true });
+req.promise.then(({ data }) => console.log(data)).catch(() => {});
+// later: req.abort()
+```
+
+### `ApiManager`
+
+Manages multiple `ApiClient` instances by typed string identifiers (similar to `JwtAuthManager`).
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `constructor` | `(config?: ApiManagerConfig<T>) => ApiManager<T>` | Create manager; `clients` accepts ready-made ApiClient instances |
+| `createClient` | `(id: T, config: ApiClientConfig) => ApiClient` | Create and register new client (throws if id exists) |
+| `getClient` | `(id: T) => ApiClient \| undefined` | Get client by id |
+| `getClientOrThrow` | `(id: T) => ApiClient` | Get client or throw if not found |
+| `hasClient` | `(id: T) => boolean` | Check if client exists |
+| `clearClient` | `(id: T) => void` | Remove client |
+| `clearAll` | `() => void` | Remove all clients |
+| `getClientIds` | `() => T[]` | Get all registered client ids |
+
+```typescript
+import { ApiManager, FetchApiClient } from "all-you-need/entities";
+
+type ApiId = "main" | "auth" | "custom";
+
+const customClient = new FetchApiClient({ baseURL: "https://custom.example.com" });
+
+const manager = new ApiManager<Record<ApiId, FetchApiClient>>({
+  clients: {
+    main: new FetchApiClient({ baseURL: "https://api.example.com", timeout: 5000 }),
+    auth: new FetchApiClient({ baseURL: "https://auth.example.com" }),
+    custom: customClient,
+  },
+});
+
+const main = manager.getClientOrThrow("main");
+const users = await main.get<User[]>("/users");
+
+manager.clearClient("auth");
+manager.createClient("auth", { baseURL: "https://auth-v2.example.com" });
+```
+
+### `AuthManager`
+
+Coordinates `JwtAuthManager` (token storage, expiration) and `ApiManager` (auth API clients) for full auth flow. Target IDs in `jwtAuthManager` must match client IDs in `authApiManager`. Clients must extend `AuthApiClient` (implement `login`, `logout`, `refresh`).
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `constructor` | `(config: AuthManagerConfig) => AuthManager` | Create manager; throws if targets and clients don't match |
+| `login` | `(targetId: T, ...credentials) => Promise<AuthTokens>` | Call client.login, store tokens in JwtAuthManager |
+| `logout` | `(targetId: T) => Promise<void>` | Call client.logout, remove tokens |
+| `refresh` | `(targetId: T) => Promise<AuthTokens>` | Get refresh token from JwtAuthManager, call client.refresh, store new tokens |
+| `getAuthData` | `(targetId: T) => JwtPayload \| undefined` | Get JWT payload for target |
+| `isAuthenticated` | `(targetId: T, leewaySeconds?: number) => boolean` | Check if target has valid token |
+| `subscribe` | `(targetId: T, callback: (event) => void) => () => void` | Subscribe to auth events for target |
+
+For token/headers, use `jwtAuthManager` directly (keep a reference).
+
+`AuthManagerConfig`: `{ jwtAuthManager: JwtAuthManager<TTargets>, authApiManager: ApiManager<TClients> }` — client and target IDs must match.
+
+```typescript
+import {
+  ApiManager,
+  AuthApiClient,
+  AuthManager,
+  JwtAuthManager,
+  JwtAuthTarget,
+  TypedStorage,
+} from "all-you-need/entities";
+import type { AuthTokens, LoginCredentials } from "all-you-need/entities";
+
+type AuthTarget = "main";
+
+class AuthApiService extends AuthApiClient {
+  override async login(credentials: LoginCredentials): Promise<AuthTokens> {
+    const { data } = await this.post<{ access_token: string; refresh_token?: string }>(
+      "/login",
+      credentials,
+    );
+    return { access_token: data.access_token, refresh_token: data.refresh_token };
+  }
+
+  override async logout(): Promise<void> {
+    await this.post("/logout");
+  }
+
+  override async refresh(refreshToken: string): Promise<AuthTokens> {
+    const { data } = await this.post<{ access_token: string; refresh_token?: string }>(
+      "/refresh",
+      { refresh_token: refreshToken },
+    );
+    return { access_token: data.access_token, refresh_token: data.refresh_token };
+  }
+}
+
+const storage = new TypedStorage({ adapter: localStorage, prefix: "auth:" });
+const jwtAuthManager = new JwtAuthManager({
+  targets: { main: new JwtAuthTarget({ storage }) },
+});
+
+const authApiManager = new ApiManager({
+  clients: { main: new AuthApiService({ baseURL: "https://auth.example.com" }) },
+});
+
+const authManager = new AuthManager({
+  jwtAuthManager,
+  authApiManager,
+});
+
+await authManager.login("main", { email: "u@ex.com", password: "***" });
+const headers = jwtAuthManager.getAuthHeaders("main"); // { Authorization: "Bearer ..." }
+await authManager.logout("main");
 ```
 
 ## Utils
